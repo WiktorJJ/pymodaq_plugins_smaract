@@ -1,0 +1,149 @@
+
+from typing import Union
+import pyvisa
+
+from pymodaq.control_modules.move_utility_classes import DAQ_Move_base, main, comon_parameters_fun, DataActuatorType
+from pymodaq.utils.data import DataActuator
+from pymodaq_data.data import Q_
+
+from pymodaq_plugins_smaract.utils import Config
+from pymeasure.instruments.smaract.scu_ascii import SmarActSCU_ASCII, SCUChannel
+
+plugin_config = Config()
+
+rm = pyvisa.ResourceManager()
+instruments_ports = rm.list_resources() # liste de touts ports sur ordinateur actuel
+instruments_movement = ['Linear','Angular']
+
+# trouver le bon port sur l'ordinateur actuel, sinon prend le 1er sur liste
+if plugin_config('SCU', 'ascii', 'default_port') in instruments_ports:
+    instrument_port = plugin_config('SCU', 'ascii', 'default_port')
+else:
+    instrument_port = instruments_ports[0]
+
+
+class DAQ_Move_SmarActSCUAscii(DAQ_Move_base):
+    """
+
+    """
+    is_multiaxes = True
+    _axis_names: Union[list[str], dict[str, int]] = ['0', '1', '2']
+    _controller_units: Union[str, list[str]] = 'mm'
+    _epsilon: Union[float, list[float]] = 0.1  # TODO replace this by a value that is correct depending on your controller
+    data_actuator_type = DataActuatorType.DataActuator
+
+    #every property of the current driver that will be used, the 'title' is used for calling the object
+    params = [
+                 {'title': 'Port', 'name': 'port', 'type': 'list', 'value': instrument_port,
+                  'limits': list(instruments_ports)},
+                 {'title': 'Device:', 'name': 'device', 'type': 'str', 'value': '', 'readonly': True},
+                 {'title': 'SN:', 'name': 'serial_number', 'type': 'str', 'value': '', 'readonly': True},
+                 {'title': 'Frequency (Hz)', 'name': 'frequency', 'type': 'int', 'value': 1000,},
+                 {'title': 'Amplitude (V)', 'name': 'amplitude', 'type': 'int', 'value': 100,
+                  'limits': [15, 100]},
+                 {'title': 'Movement', 'name': 'movement', 'type': 'list', 'value': instruments_movement,
+                  'limits': list(instruments_movement)},
+
+    ] + comon_parameters_fun(is_multiaxes=is_multiaxes, axis_names=_axis_names, epsilon=_epsilon)
+    ##########################################################
+
+    def ini_attributes(self):
+        self.controller: Union[SCUChannel, SmarActSCU_ASCII] = None
+
+    def commit_settings(self, param):
+        pass
+        if param.name() == 'amplitude':
+            self.controller.amplitude = Q_(param.value(), 'V')
+        # elif param.name() == 'frequency':
+        #     self.controller.frequency = param.value()
+
+    def ini_stage(self, controller=None):
+        """Initialize the controller and stages (axes) with given parameters.
+
+        """
+
+        if self.is_master:
+            self.controller = SmarActSCU_ASCII(self.settings['port'])
+        else:
+            self.controller = controller
+
+        self.settings.child('device').setValue(self.controller.model)
+        self.settings.child('serial_number').setValue(self.controller.serial_nb)
+
+#        self.axis_unit = self.controller.units
+
+        info = ''
+        initialized = True
+
+        return info, initialized
+
+    def close(self):
+        """
+        Close the communication with the SmarAct controller.
+        """
+        self.controller.close()
+
+    def get_actuator_value(self):
+        """
+        Get the current position from the hardware with scaling conversion.
+
+        Returns
+        -------
+        float: The position obtained after scaling conversion.
+        """
+        position = DataActuator(data=self.controller.get_position(), units=self.axis_unit)
+        # convert position if scaling options have been used, mandatory here
+        position = self.get_position_with_scaling(position)
+        #position = self.target_position
+        self.current_position = position
+        return position
+
+    def move_abs(self, position):
+        """
+        Move to an absolute position
+
+        Parameters:
+        ----------
+         - position: float
+        """
+        # limit position if bounds options has been selected and if position is
+        # out of them
+        position = self.check_bound(position)
+        self.target_position = position
+        # convert the user set position to the controller position if scaling
+        # has been activated by user
+        position = self.set_position_with_scaling(position)
+
+        self.controller.move_abs(position.value())
+
+    def move_rel(self, position):
+        """
+        Move to a relative position
+
+        Parameters:
+        ----------
+         - position: float
+        """
+        position = (self.check_bound(self.current_position + position) - self.current_position)
+        self.target_position = position + self.current_position
+        position = self.set_position_relative_with_scaling(position)
+
+        self.controller.move_rel(position.value())
+
+    def move_home(self):
+        """
+        Move to home and reset position to zero.
+        """
+        self.controller.move_home()
+        self.get_actuator_value()
+
+    def stop_motion(self):
+        """
+        Stop any ongoing movement of the positionner.
+        """
+        self.controller.stop()
+        self.move_done()
+
+
+if __name__ == "__main__":
+    main(__file__, init=False)
