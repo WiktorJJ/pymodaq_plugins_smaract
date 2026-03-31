@@ -4,10 +4,11 @@ import pyvisa
 
 from pymodaq.control_modules.move_utility_classes import DAQ_Move_base, main, comon_parameters_fun, DataActuatorType
 from pymodaq.utils.data import DataActuator
-from pymodaq_data.data import Q_
 
 from pymodaq_plugins_smaract.utils import Config
-from pymeasure.instruments.smaract.scu_ascii import SmarActSCU_ASCII, SCUChannel
+from pymeasure.instruments.smaract.scu_ascii import (
+    SmarActSCU_ASCII, SmarActSCULinear, SmarActSCUAngular,
+    SCUChannelLinear, SCUChannelAngular, Q_)
 
 plugin_config = Config()
 
@@ -48,7 +49,8 @@ class DAQ_Move_SmarActSCUAscii(DAQ_Move_base):
     ##########################################################
 
     def ini_attributes(self):
-        self.controller: Union[SCUChannel, SmarActSCU_ASCII] = None
+        self.controller: Union[SCUChannelLinear, SmarActSCUAngular,
+        SmarActSCU_ASCII] = None
 
     def commit_settings(self, param):
         pass
@@ -63,15 +65,20 @@ class DAQ_Move_SmarActSCUAscii(DAQ_Move_base):
         """
 
         if self.is_master:
-            self.controller = SmarActSCU_ASCII(self.settings['port'])
+            if self.settings['movement'] == 'Linear':
+                self.controller = SmarActSCULinear(self.settings['port'])
+            else:
+                self.controller = SmarActSCUAngular(self.settings['port'])
         else:
             self.controller = controller
 
         self.settings.child('device').setValue(self.controller.model)
         self.settings.child('serial_number').setValue(self.controller.serial_nb)
 
-#        self.axis_unit = self.controller.units
+        #is it not hardcoding here, when we say that the channel must be '0'?
+        self.axis_units = [self.controller.channels['0'].unit for _ in range(3)]
 
+        self.settings.child('movement').setOpts(enabled=False)
         info = ''
         initialized = True
 
@@ -81,7 +88,9 @@ class DAQ_Move_SmarActSCUAscii(DAQ_Move_base):
         """
         Close the communication with the SmarAct controller.
         """
-        self.controller.close()
+        self.settings.child('movement').setOpts(enabled=True)
+        if self.is_master:
+            self.controller.close()
 
     def get_actuator_value(self):
         """
@@ -91,14 +100,14 @@ class DAQ_Move_SmarActSCUAscii(DAQ_Move_base):
         -------
         float: The position obtained after scaling conversion.
         """
-        position = DataActuator(data=self.controller.get_position(), units=self.axis_unit)
+        value = DataActuator(data=self.controller.channels['0'].get_position(), units=self.axis_unit)
         # convert position if scaling options have been used, mandatory here
-        position = self.get_position_with_scaling(position)
-        #position = self.target_position
-        self.current_position = position
-        return position
+        value = self.get_position_with_scaling(value)
+        value = self.target_position
+        self.current_position = value
+        return value
 
-    def move_abs(self, position):
+    def move_abs(self, value: DataActuator):
         """
         Move to an absolute position
 
@@ -108,15 +117,17 @@ class DAQ_Move_SmarActSCUAscii(DAQ_Move_base):
         """
         # limit position if bounds options has been selected and if position is
         # out of them
-        position = self.check_bound(position)
-        self.target_position = position
+        value = self.check_bound(value)
+        self.target_value = value
         # convert the user set position to the controller position if scaling
         # has been activated by user
-        position = self.set_position_with_scaling(position)
+        value = self.set_position_with_scaling(value)
 
-        self.controller.move_abs(position.value())
+        self.controller.channels[self.axis_name].move_abs(value.quantities[0][0])
+        #int(value.value(self.axis_unit))
 
-    def move_rel(self, position):
+
+    def move_rel(self, value: DataActuator):
         """
         Move to a relative position
 
@@ -128,13 +139,14 @@ class DAQ_Move_SmarActSCUAscii(DAQ_Move_base):
         self.target_position = position + self.current_position
         position = self.set_position_relative_with_scaling(position)
 
-        self.controller.move_rel(position.value())
+        self.controller.channels['0'].move_rel(int(position.value()))
+        self.controller.channels[self.axis_name].move_abs(value.quantities[0][0])
 
     def move_home(self):
         """
         Move to home and reset position to zero.
         """
-        self.controller.move_home()
+        self.controller.channels['0'].move_to_ref()
         self.get_actuator_value()
 
     def stop_motion(self):
@@ -142,7 +154,7 @@ class DAQ_Move_SmarActSCUAscii(DAQ_Move_base):
         Stop any ongoing movement of the positionner.
         """
         self.controller.stop()
-        self.move_done()
+        ##self.move_done()
 
 
 if __name__ == "__main__":
