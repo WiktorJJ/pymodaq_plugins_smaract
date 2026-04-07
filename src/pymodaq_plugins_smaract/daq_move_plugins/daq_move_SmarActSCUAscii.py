@@ -100,7 +100,8 @@ class DAQ_Move_SmarActSCUAscii(DAQ_Move_base):
         -------
         float: The position obtained after scaling conversion.
         """
-        value = DataActuator(data=self.controller.channels['0'].get_position(), units=self.axis_unit)
+        quantity: Q_ = self.controller.channels['0'].get_position()
+        value = DataActuator(data=quantity.magnitude, units=quantity.units)
         # convert position if scaling options have been used, mandatory here
         value = self.get_position_with_scaling(value)
         value = self.target_position
@@ -133,9 +134,9 @@ class DAQ_Move_SmarActSCUAscii(DAQ_Move_base):
 
         Parameters:
         ----------
-         - position: float
+         - position: float
         """
-        position = (self.check_bound(self.current_position + position) - self.current_position)
+        position = (self.check_bound(self.current_position + value) - self.current_position)
         self.target_position = position + self.current_position
         position = self.set_position_relative_with_scaling(position)
 
