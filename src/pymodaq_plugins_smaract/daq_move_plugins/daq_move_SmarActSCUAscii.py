@@ -53,11 +53,10 @@ class DAQ_Move_SmarActSCUAscii(DAQ_Move_base):
         SmarActSCU_ASCII] = None
 
     def commit_settings(self, param):
-        pass
         if param.name() == 'amplitude':
             self.controller.amplitude = Q_(param.value(), 'V')
-        # elif param.name() == 'frequency':
-        #     self.controller.frequency = param.value()
+        elif param.name() == 'frequency':
+            self.controller.frequency = Q_(param.value(), 'Hz')
 
     def ini_stage(self, controller=None):
         """Initialize the controller and stages (axes) with given parameters.
@@ -74,6 +73,9 @@ class DAQ_Move_SmarActSCUAscii(DAQ_Move_base):
 
         self.settings.child('device').setValue(self.controller.model)
         self.settings.child('serial_number').setValue(self.controller.serial_nb)
+
+        self.commit_settings(self.settings.child('amplitude'))
+        self.commit_settings(self.settings.child('frequency'))
 
         #is it not hardcoding here, when we say that the channel must be '0'?
         self.axis_units = [self.controller.channels['0'].unit for _ in range(3)]
