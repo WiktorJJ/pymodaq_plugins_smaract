@@ -136,12 +136,12 @@ class DAQ_Move_SmarActSCUAscii(DAQ_Move_base):
         ----------
          - position: float
         """
-        position = (self.check_bound(self.current_position + value) - self.current_position)
-        self.target_position = position + self.current_position
-        position = self.set_position_relative_with_scaling(position)
+        value = (self.check_bound(self.current_position + value) - self.current_position)
+        self.target_position = value + self.current_position
+        value = self.set_position_relative_with_scaling(value)
 
-        self.controller.channels['0'].move_rel(int(position.value()))
-        self.controller.channels[self.axis_name].move_abs(value.quantities[0][0])
+        self.controller.channels['0'].move_rel(int(value.value(self.axis_unit)))
+        self.controller.channels[self.axis_name].move_rel(value.quantities[0][0])
 
     def move_home(self):
         """
