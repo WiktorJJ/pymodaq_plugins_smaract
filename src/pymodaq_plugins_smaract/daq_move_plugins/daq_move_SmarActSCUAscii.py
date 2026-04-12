@@ -4,17 +4,16 @@ import pyvisa
 
 from pymodaq.control_modules.move_utility_classes import DAQ_Move_base, main, comon_parameters_fun, DataActuatorType
 from pymodaq.utils.data import DataActuator
-
 from pymodaq_plugins_smaract.utils import Config
 from pymeasure.instruments.smaract.scu_ascii import (
     SmarActSCU_ASCII, SmarActSCULinear, SmarActSCUAngular,
-    SCUChannelLinear, SCUChannelAngular, Q_)
+    SCUChannelStepper,SmarActSCUStepper,SCUChannelLinear, SCUChannelAngular, Q_)
 
 plugin_config = Config()
 
 rm = pyvisa.ResourceManager()
 instruments_ports = rm.list_resources() # liste de touts ports sur ordinateur actuel
-instruments_movement = ['Linear','Angular']
+instruments_movement = ['Linear','Angular','Stepper']
 
 # trouver le bon port sur l'ordinateur actuel, sinon prend le 1er sur liste
 if plugin_config('SCU', 'ascii', 'default_port') in instruments_ports:
@@ -66,8 +65,10 @@ class DAQ_Move_SmarActSCUAscii(DAQ_Move_base):
         if self.is_master:
             if self.settings['movement'] == 'Linear':
                 self.controller = SmarActSCULinear(self.settings['port'])
-            else:
+            elif self.settings['movement'] == 'Angular':
                 self.controller = SmarActSCUAngular(self.settings['port'])
+            else :  self.controller = SmarActSCUStepper(self.settings['port'])
+
         else:
             self.controller = controller
 
