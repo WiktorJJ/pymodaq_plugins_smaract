@@ -66,9 +66,11 @@ class DAQ_Move_SmarActSCUAscii(DAQ_Move_base):
             if self.settings['movement'] == 'Linear':
                 self.controller = SmarActSCULinear(self.settings['port'])
             elif self.settings['movement'] == 'Angular':
+                self.axis_unit = 'm°'
                 self.controller = SmarActSCUAngular(self.settings['port'])
             elif  self.settings['movement'] == 'Stepper':
                 self.controller = SmarActSCUStepper(self.settings['port'])
+                self.axis_unit = ''
 
         else:
             self.controller = controller
@@ -96,50 +98,35 @@ class DAQ_Move_SmarActSCUAscii(DAQ_Move_base):
         if self.is_master:
             self.controller.close()
 
-    def get_actuator_value(self):
-        """
-        Get the current position from the hardware with scaling conversion.
+    def  get_actuator_value(self):
 
-        Returns
-        -------
-        float: The position obtained after scaling conversion.
-        """
         pos = self.controller.channels[self.axis_name].get_position()
-
-        # Safely handle both Quantity (Linear/Angular) and Integer (Stepper)
         if isinstance(pos, Q_):
-            val = pos.magnitude
+            val = float(pos.magnitude)
             unit = str(pos.units)
         else:
-            val = pos
-            unit = self.controller.channels[self.axis_name].unit  # will be 'step'
+            val = float(pos)
+            unit = ''
 
         value = DataActuator(data=val, units=unit)
-
-        # convert position if scaling options have been used
         value = self.get_position_with_scaling(value)
-
         self.current_position = value
         return value
 
     def move_abs(self, value: DataActuator):
-        """
-        Move to an absolute position
 
-        Parameters:
-        ----------
-         - position: float
-        """
-        # limit position if bounds options has been selected and if position is
-        # out of them
         value = self.check_bound(value)
         self.target_value = value
-        # convert the user set position to the controller position if scaling
-        # has been activated by user
         value = self.set_position_with_scaling(value)
 
-        self.controller.channels[self.axis_name].move_abs(value.quantities[0][0])
-        #int(value.value(self.axis_unit))
+        if self.settings['movement'] == 'Stepper':
+            # Le Stepper veut un nombre pur (magnitude)
+            target = value.quantities[0][0].magnitude
+        else:
+            # Linear/Angular utilisent l'objet Quantity exact
+            target = value.quantities[0][0]
+
+        self.controller.channels[self.axis_name].move_abs(target)
 
 
     def move_rel(self, value: DataActuator):
@@ -154,7 +141,14 @@ class DAQ_Move_SmarActSCUAscii(DAQ_Move_base):
         self.target_position = value + self.current_position
         value = self.set_position_relative_with_scaling(value)
 
-        self.controller.channels[self.axis_name].move_rel(value.quantities[0][0])
+        if self.settings['movement'] == 'Stepper':
+            target = value.quantities[0][0].magnitude
+        else:
+            target = value.quantities[0][0]
+
+        self.controller.channels[self.axis_name].move_rel(target)
+
+
 
     def move_home(self):
         """
