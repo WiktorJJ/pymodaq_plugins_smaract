@@ -6,8 +6,8 @@ from pymodaq.control_modules.move_utility_classes import DAQ_Move_base, main, co
 from pymodaq.utils.data import DataActuator
 from pymodaq_plugins_smaract.utils import Config
 from pymeasure.instruments.smaract.scu_ascii import (
-    SmarActSCU_ASCII, SmarActSCULinear, SmarActSCUAngular,
-    SCUChannelStepper,SmarActSCUStepper,SCUChannelLinear, SCUChannelAngular, Q_)
+    SCUChannelStepper,SmarActSCUStepper,SmarActSCU_ASCII, SmarActSCULinear, SmarActSCUAngular,
+    SCUChannelLinear, SCUChannelAngular, Q_)
 
 plugin_config = Config()
 
@@ -67,7 +67,8 @@ class DAQ_Move_SmarActSCUAscii(DAQ_Move_base):
                 self.controller = SmarActSCULinear(self.settings['port'])
             elif self.settings['movement'] == 'Angular':
                 self.controller = SmarActSCUAngular(self.settings['port'])
-            else :  self.controller = SmarActSCUStepper(self.settings['port'])
+            elif  self.settings['movement'] == 'Stepper':
+                self.controller = SmarActSCUStepper(self.settings['port'])
 
         else:
             self.controller = controller
@@ -103,11 +104,21 @@ class DAQ_Move_SmarActSCUAscii(DAQ_Move_base):
         -------
         float: The position obtained after scaling conversion.
         """
-        quantity: Q_ = self.controller.channels['0'].get_position()
-        value = DataActuator(data=quantity.magnitude, units=quantity.units)
-        # convert position if scaling options have been used, mandatory here
+        pos = self.controller.channels[self.axis_name].get_position()
+
+        # Safely handle both Quantity (Linear/Angular) and Integer (Stepper)
+        if isinstance(pos, Q_):
+            val = pos.magnitude
+            unit = str(pos.units)
+        else:
+            val = pos
+            unit = self.controller.channels[self.axis_name].unit  # will be 'step'
+
+        value = DataActuator(data=val, units=unit)
+
+        # convert position if scaling options have been used
         value = self.get_position_with_scaling(value)
-        value = self.target_position
+
         self.current_position = value
         return value
 
@@ -143,14 +154,13 @@ class DAQ_Move_SmarActSCUAscii(DAQ_Move_base):
         self.target_position = value + self.current_position
         value = self.set_position_relative_with_scaling(value)
 
-        self.controller.channels['0'].move_rel(int(value.value(self.axis_unit)))
         self.controller.channels[self.axis_name].move_rel(value.quantities[0][0])
 
     def move_home(self):
         """
         Move to home and reset position to zero.
         """
-        self.controller.channels['0'].move_to_ref()
+        self.controller.channels[self.axis_name].move_to_ref()
         self.get_actuator_value()
 
     def stop_motion(self):
