@@ -29,7 +29,7 @@ class DAQ_Move_SmarActSCUAscii(DAQ_Move_base):
     is_multiaxes = True
     _axis_names: Union[list[str], dict[str, int]] = ['0', '1', '2']
     _controller_units: Union[str, list[str]] = 'mm'
-    _epsilon: Union[float, list[float]] = 0.1  # TODO replace this by a value that is correct depending on your controller
+    _epsilon: Union[float, list[float]] = 0.1
     data_actuator_type = DataActuatorType.DataActuator
 
     #every property of the current driver that will be used, the 'title' is used for calling the object
@@ -39,8 +39,8 @@ class DAQ_Move_SmarActSCUAscii(DAQ_Move_base):
                  {'title': 'Device:', 'name': 'device', 'type': 'str', 'value': '', 'readonly': True},
                  {'title': 'SN:', 'name': 'serial_number', 'type': 'str', 'value': '', 'readonly': True},
                  {'title': 'Frequency (Hz)', 'name': 'frequency', 'type': 'int', 'value': 1000,},
-                 {'title': 'Amplitude (V)', 'name': 'amplitude', 'type': 'int', 'value': 100,
-                  'limits': [15, 100]},
+                 {'title': 'Amplitude (dV)', 'name': 'amplitude', 'type': 'int', 'value': 300,
+                  'limits': [150, 1000]},
                  {'title': 'Movement', 'name': 'movement', 'type': 'list', 'value': instruments_movement,
                   'limits': list(instruments_movement)},
 
@@ -53,7 +53,7 @@ class DAQ_Move_SmarActSCUAscii(DAQ_Move_base):
 
     def commit_settings(self, param):
         if param.name() == 'amplitude':
-            self.controller.amplitude = Q_(param.value(), 'V')
+            self.controller.amplitude = Q_(param.value(), 'dV')
         elif param.name() == 'frequency':
             self.controller.frequency = Q_(param.value(), 'Hz')
 
@@ -64,6 +64,7 @@ class DAQ_Move_SmarActSCUAscii(DAQ_Move_base):
 
         if self.is_master:
             if self.settings['movement'] == 'Linear':
+                self.axis_unit = 'µm'
                 self.controller = SmarActSCULinear(self.settings['port'])
             elif self.settings['movement'] == 'Angular':
                 self.axis_unit = 'm°'
@@ -82,7 +83,7 @@ class DAQ_Move_SmarActSCUAscii(DAQ_Move_base):
         self.commit_settings(self.settings.child('frequency'))
 
         #is it not hardcoding here, when we say that the channel must be '0'?
-        self.axis_units = [self.controller.channels['0'].unit for _ in range(3)]
+        self.axis_units = [self.controller.channels[self.axis_name].unit for _ in range(3)]
 
         self.settings.child('movement').setOpts(enabled=False)
         info = ''
@@ -100,13 +101,21 @@ class DAQ_Move_SmarActSCUAscii(DAQ_Move_base):
 
     def  get_actuator_value(self):
 
-        pos = self.controller.channels[self.axis_name].get_position()
-        if isinstance(pos, Q_):
+        channel = self.controller.channels[self.axis_name]
+
+        if isinstance(channel, SCUChannelStepper):
+            val = float(self.controller.channels[self.axis_name].position_steps)
+            unit = 'step'
+
+        elif isinstance(channel, SCUChannelLinear):
+            pos = self.controller.channels[self.axis_name].position
             val = float(pos.magnitude)
             unit = str(pos.units)
         else:
-            val = float(pos)
-            unit = ''
+            #Angulaire
+            pos = self.controller.channels[self.axis_name].angle
+            val = float(pos.magnitude)
+            unit = str(pos.units)
 
         value = DataActuator(data=val, units=unit)
         value = self.get_position_with_scaling(value)
@@ -119,36 +128,45 @@ class DAQ_Move_SmarActSCUAscii(DAQ_Move_base):
         self.target_value = value
         value = self.set_position_with_scaling(value)
 
-        if self.settings['movement'] == 'Stepper':
-            # Le Stepper veut un nombre pur (magnitude)
-            target = value.quantities[0][0].magnitude
+        channel = self.controller.channels[self.axis_name]
+
+        if isinstance(channel, SCUChannelStepper):
+
+            target = int(value.value())
+
+        elif isinstance(channel, SCUChannelLinear):
+
+            target = Q_(value.value(), 'µm')
+
         else:
-            # Linear/Angular utilisent l'objet Quantity exact
-            target = value.quantities[0][0]
+            # Angular
+            target = Q_(value.value(), 'm°')
 
-        self.controller.channels[self.axis_name].move_abs(target)
-
+        channel.move_abs(target)
 
     def move_rel(self, value: DataActuator):
-        """
-        Move to a relative position
 
-        Parameters:
-        ----------
-         - position: float
-        """
-        value = (self.check_bound(self.current_position + value) - self.current_position)
+        value = (self.check_bound(self.current_position + value)
+                 - self.current_position)
+
         self.target_position = value + self.current_position
         value = self.set_position_relative_with_scaling(value)
 
-        if self.settings['movement'] == 'Stepper':
-            target = value.quantities[0][0].magnitude
+        channel = self.controller.channels[self.axis_name]
+
+        if isinstance(channel, SCUChannelStepper):
+
+            target = int(value.value())
+
+        elif isinstance(channel, SCUChannelLinear):
+
+            target = Q_(value.value(), 'µm')
+
         else:
-            target = value.quantities[0][0]
+            # Angular
+            target = Q_(value.value(), 'm°')
 
-        self.controller.channels[self.axis_name].move_rel(target)
-
-
+        channel.move_rel(target)
 
     def move_home(self):
         """
@@ -161,8 +179,7 @@ class DAQ_Move_SmarActSCUAscii(DAQ_Move_base):
         """
         Stop any ongoing movement of the positionner.
         """
-        self.controller.stop()
-        ##self.move_done()
+        self.controller.channels[self.axis_name].stop()
 
 
 if __name__ == "__main__":
