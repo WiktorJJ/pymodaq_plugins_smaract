@@ -105,7 +105,7 @@ class DAQ_Move_SmarActSCUAscii(DAQ_Move_base):
 
         if isinstance(channel, SCUChannelStepper):
             val = float(self.controller.channels[self.axis_name].position_steps)
-            unit = 'step'
+            unit = ''
 
         elif isinstance(channel, SCUChannelLinear):
             pos = self.controller.channels[self.axis_name].position
